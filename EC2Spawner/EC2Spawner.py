@@ -2,6 +2,7 @@ import jupyterhub
 import boto3
 import sys
 from tornado import gen
+import os
 
 from jupyterhub.spawner import Spawner
 
