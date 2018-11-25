@@ -9,7 +9,7 @@ setup(
     author_email='mail@thomasridings.com',
     license='3 Clause BSD',
     packages=['EC2Spawner'],
-    scripts=['./bootstrap.sh'],
+    scripts=['./EC2Spawner/bootstrap.sh'],
     install_requires=[
       'setuptools',
       'jupyterhub',
