@@ -16,8 +16,7 @@ class EC2Spawner(Spawner):
     A JupyterHub spawner using Boto3 to create EC2 instances on demand.
 
     """
-
-    def buildInstance(instanceDef):
+    def buildInstance(self, instanceDef):
         """
             Build instance according to instanceDefinition object
 
@@ -33,7 +32,7 @@ class EC2Spawner(Spawner):
             returns the id, ip address and full description of the instance once available as a dictionary.
         """
         # Create tag specifications which we use to pass variables to the instance
-        tags = user_env(self, env, instanceDef)
+        tags = self.user_env(instanceDef)
 
         with open('./bootstrap.sh', 'r') as myfile:
             UserData = myfile.read()
@@ -65,9 +64,11 @@ class EC2Spawner(Spawner):
         print()
         return {"instanceID": instance[0].id, "instanceIP": instanceIP, 'description': description}
     
-    def user_env(self, env, instanceDef):
+    
+    def user_env(self, instanceDef):
+        env = {}
         env['USER'] = self.user.name
-        env['HOME'] = self.home_path
+        env['HOME'] = '/home'
         env['SHELL'] = '/bin/bash'
         env['Name'] = instanceDef['AWS_INSTANCE_NAME']
 
@@ -93,9 +94,13 @@ class EC2Spawner(Spawner):
             'AWS_INSTANCE_NAME': 'Jupyter',
             'AWS_IAM_ARN': os.getenv('AWS_IAM_ARN')
         }
-
         
-        self.ec2_instance = buildInstance(instanceDef)
+        print('building instance')
+        ec2_instance = self.buildInstance(instanceDef)
+        self.ec2_instance
+
+
+
         return self.ec2_instance['instanceIP']
 
 
