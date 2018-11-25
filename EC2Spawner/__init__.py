@@ -1,5 +1,3 @@
-from simpEC2Spawner.simpEC2Spawner import EC2Spawner
-
-name = "ridings=-jupyterhub-ec2spawner"
+from EC2Spawner.EC2Spawner import EC2Spawner
 
 __all__ = [EC2Spawner]
