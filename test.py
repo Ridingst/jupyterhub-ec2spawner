@@ -15,4 +15,5 @@ instanceDef= {
     'AWS_IAM_ARN': os.getenv('AWS_IAM_ARN')
 }
 
-print(ec2spawner.buildInstance(instanceDef))
+#print(ec2spawner.buildInstance(instanceDef))
+#print(ec2spawner.user_env('', {}, instanceDef))

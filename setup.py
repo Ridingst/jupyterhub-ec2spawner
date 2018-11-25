@@ -9,4 +9,10 @@ setup(
     author_email='mail@thomasridings.com',
     license='3 Clause BSD',
     packages=['EC2Spawner'],
+    install_requires=[
+      'setuptools',
+      'jupyterhub',
+      'boto3',
+      'tornado'
+  ],
 )
