@@ -7,6 +7,9 @@ from jupyterhub.spawner import Spawner
 
 
 class EC2Spawner(Spawner):
+    client = boto3.client('ec2')
+    ec2 = boto3.resource('ec2')
+    
     print("Loading EC2Spawner Class")
     """
     A JupyterHub spawner using Boto3 to create EC2 instances on demand.
@@ -31,8 +34,6 @@ class EC2Spawner(Spawner):
         # Create tag specifications which we use to pass variables to the instance
         tags = user_env(self, env, instanceDef)
 
-        client = boto3.client('ec2')
-        ec2 = boto3.resource('ec2')
         with open('./bootstrap.sh', 'r') as myfile:
             UserData = myfile.read()
         
@@ -60,11 +61,12 @@ class EC2Spawner(Spawner):
         instanceIP = description['Reservations'][0]['Instances'][0]['NetworkInterfaces'][0]['Association']['PublicIp']
         
         #return {"instanceID": instance[0].id, "instanceIP": description['Reservations']['Instances'][0]['NetworkInterfaces'][0]['Association']['PublicIp'], 'description': description}
+        print()
         return {"instanceID": instance[0].id, "instanceIP": instanceIP, 'description': description}
     
     def user_env(self, env, instanceDef):
-        #env['USER'] = self.user.name
-        #env['HOME'] = self.home_path
+        env['USER'] = self.user.name
+        env['HOME'] = self.home_path
         env['SHELL'] = '/bin/bash'
         env['Name'] = instanceDef['AWS_INSTANCE_NAME']
 
@@ -91,15 +93,20 @@ class EC2Spawner(Spawner):
             'AWS_IAM_ARN': os.getenv('AWS_IAM_ARN')
         }
 
-        return buildInstance(instanceDef)['instanceIP']
+        
+        self.ec2_instance = buildInstance(instanceDef)
+        return self.ec2_instance['instanceIP']
 
 
     @gen.coroutine
     def start(self):
-        notebook_server_ip = yield self.start_ec2_instance(self) # that would be a function that uses boto3 to start an instance, pass it the dict from get_env(), and return its IP
-        #return (notebook_server_ip, NOTEBOOK_SERVER_PORT)
-        return (notebook_server_ip, 8888)
-
+        notebook_server_ip = yield self.start_ec2_instance() # that would be a function that uses boto3 to start an instance, pass it the dict from get_env(), and return its IP
+        self.ec2_instance['instanceID']
+        return (notebook_server_ip, NOTEBOOK_SERVER_PORT)
+        #return (notebook_server_ip, 8888)
+    
+    def stop_ec2_instance(instanceID):
+        ec2.instances.filter(InstanceIds=[instanceID]).terminate()
 
     @gen.coroutine
     def stop(self):
