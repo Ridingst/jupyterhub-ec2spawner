@@ -116,6 +116,7 @@ class EC2Spawner(Spawner):
         env['JPY_HUB_API_URL'] = hub_api_url
         env['JUPYTERHUB_API_URL'] = hub_api_url
 
+        self.log.debug("Env built: {}".format(env))
         return env
 
     async def start(self):
