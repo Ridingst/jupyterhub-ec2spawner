@@ -65,5 +65,4 @@ if __name__ == "__main__":
 
 echo "done everything"
 
-/usr/local/bin/jupyterhub-singleuser --ip=0.0.0.0 --allow-root &> /home/ec2-user/jupyter
 export DONE
