@@ -49,7 +49,7 @@ class EC2Spawner(Spawner):
             config=True)
 
     # FIXME Fix help, what happens when not set?
-    hub_api_url = Unicode("",
+    hub_api_url = Unicode(os.getenv("HERE"),
             help=dedent("""If set, Spawner will configure the containers to use
             the specified URL to connect the hub api. This is useful when the
             hub_api is bound to listen on all ports or is running inside of a
@@ -143,6 +143,7 @@ class EC2Spawner(Spawner):
 
         remote_cmd = ' '.join(cmd)
 
+        self.log.debug("Command issued to remote serve: {}".format(remote_cmd))
         self.pid = await self.exec_notebook(remote_cmd)
 
         self.log.debug("Starting User: {}, PID: {}".format(self.user.name, self.pid))
