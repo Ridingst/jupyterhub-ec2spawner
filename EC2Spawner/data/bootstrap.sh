@@ -12,24 +12,22 @@ INSTANCE_ID=$(/usr/bin/curl --silent http://169.254.169.254/latest/meta-data/ins
 echo 'export REGION='$REGION > ~/startup.sh
 echo 'export INSTANCE_ID='$INSTANCE_ID >> ~/startup.sh
 
-chmod +x ~/startup.sh
-sudo cp ~/startup.sh /etc/profile.d/startup.sh
-
-echo '/usr/local/bin/jupyterhub-singleuser' >> ~/bootup.sh
-
-chmod +x ~/bootup.sh
-sudo cp ~/bootup.sh /etc/init.d/bootup.sh
-
 
 export_statement=$(aws ec2 describe-tags --region "$REGION" \
     --filters "Name=resource-id,Values=$INSTANCE_ID" \
     --query 'Tags[?!contains(Key, `:`)].[Key,Value]' \
     --output text | \
-    sed -E 's/^([^\s\t]+)[\s\t]+([^\n]+)$/export \1="\2"/g'
+    sed -E 's/^([^\s\t]+)[\s\t]+([^\n]+)$/export \1="\2"/g >> ~/startup.sh'
 )
 
 eval $export_statement
 
+chmod +x ~/startup.sh
+sudo cp ~/startup.sh /etc/init.d/startup.sh
+
+echo 'TESTING LOGGING' > ~/TESTLOG.log
+
 echo "done everything"
 
+/usr/local/bin/jupyterhub-singleuser --ip=0.0.0.0 --allow-root &> /home/ec2-user/jupyter
 export DONE

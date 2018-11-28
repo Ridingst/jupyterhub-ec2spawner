@@ -1,30 +1,89 @@
 import jupyterhub
+import asyncio, asyncssh
 import boto3
 import sys
 import socket
 import errno
+from textwrap import dedent
+
 from tornado import gen, ioloop
 from tornado.concurrent import return_future
 from tornado.log import app_log
+
+from traitlets import Bool, Unicode, Integer, List, observe
 import os
+
 
 from jupyterhub.spawner import Spawner
 
 class EC2Spawner(Spawner):
+    """
+    A JupyterHub spawner using Boto3 to create EC2 instances on demand.
+    """
+    print("Loaded EC2Spawner Class")
     client = boto3.client('ec2')
     ec2 = boto3.resource('ec2')
     ec2_instance_id = None
     ec2_instance_ip = None
     ec2_instance_port = int(os.getenv('AWS_NOTEBOOK_SERVER_PORT'))
 
+    env = None
+
+    remote_port = Unicode("22",
+            help="SSH remote port number",
+            config=True)
+
+    ssh_command = Unicode("/usr/bin/ssh",
+            help="Actual SSH command",
+            config=True)
+
+    path = Unicode("/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin",
+            help="Default PATH (should include jupyter and python)",
+            config=True)
+
+    remote_port_command = Unicode("/usr/bin/python /usr/local/bin/get_port.py",
+            help="Command to return unused port on remote host",
+            config=True)
+
+    hub_api_url = Unicode("",
+            help=dedent("""If set, Spawner will configure the containers to use
+            the specified URL to connect the hub api. This is useful when the
+            hub_api is bound to listen on all ports or is running inside of a
+            container."""),
+            config=True)
+
+    ssh_keyfile = Unicode(os.getenv("PEM_FILE_LOCATION"),
+            help=dedent("""Key file used to authenticate hub with remote host.
+            `~` will be expanded to the user's home directory and `{username}`
+            will be expanded to the user's username"""),
+            config=True)
+
+    pid = Integer(0,
+            help=dedent("""Process ID of single-user server process spawned for
+            current user."""))
     
-    print("Loaded EC2Spawner Class")
-    """
-    A JupyterHub spawner using Boto3 to create EC2 instances on demand.
-    """
+    def get_remote_user(self, username):
+        """Map JupyterHub username to remote username."""
+        return 'ec2-user'
+    
+    async def remote_random_port(self):
+        """Select unoccupied port on the remote host and return it. 
+        
+        If this fails for some reason return `None`."""
+
+        username = self.get_remote_user(self.user.name)
+        k = asyncssh.read_private_key(self.ssh_keyfile.format(username=self.user.name))
+
+    def setup_ssh_tunnel(port, user, server):
+        """Setup a local SSH port forwarding"""
+        #tunnel.openssh_tunnel(port, port, "%s@%s" % (user, server))
+        call(["ssh", "-N", "-f", "%s@%s" % (user, server),
+            "-L {port}:localhost:{port}".format(port=port)])
+
+
 
     @return_future
-    def buildInstance(self,  instanceDef, callback):
+    def buildInstance(self,  instanceDef, env, callback):
         """
             Build instance according to instanceDefinition object
 
@@ -40,10 +99,12 @@ class EC2Spawner(Spawner):
             returns the id, ip address and full description of the instance once available as a dictionary.
         """
         # Create tag specifications which we use to pass variables to the instance
-        tags = self.user_env(instanceDef)
+        tags = self.env_to_tags(self.user_env())
+
         import EC2Spawner as ec2spawnerModule
-        dirString = os.path.dirname(ec2spawnerModule.__file__) + '/data/bootstrap.sh'
-        with open(dirString, 'r') as myfile:
+        bootstrapPath = os.path.dirname(ec2spawnerModule.__file__) + '/data/bootstrap.sh'
+
+        with open(bootstrapPath, 'r') as myfile:
             UserData = myfile.read()
         
         instance = self.ec2.create_instances(
@@ -70,20 +131,12 @@ class EC2Spawner(Spawner):
         instanceIP = description['Reservations'][0]['Instances'][0]['NetworkInterfaces'][0]['Association']['PublicIp']
 
         self.ec2_instance_ip = instanceIP
+        print(self.ec2_instance_ip)
         self.ec2_instance_id = instance[0].id
         callback(instanceIP)
     
     
-    def user_env(self, instanceDef):
-        env = self.get_env()
-        env['USER'] = self.user.name
-        env['HOME'] = '/home'
-        env['SHELL'] = '/bin/bash'
-        env['Name'] = instanceDef['AWS_INSTANCE_NAME']
-        env['JUPYTERHUB_API_URL'] = os.getenv('AWS_HUB_URL') + '/hub/api'
-        
-        print(env)
-
+    def env_to_tags(self, env):
         TagSpecifications=[{
             'ResourceType': 'instance',
             'Tags': []
@@ -95,9 +148,24 @@ class EC2Spawner(Spawner):
             )
         
         return TagSpecifications
+    
+    def user_env(self):
+        env = self.get_env()
+        env.update(dict(
+            USER=self.user.name,
+            HOME='/home',
+            SHELL='/bin/bash',
+            Name='Jupyter',
+            JUPYTERHUB_API_URL=os.getenv('AWS_HUB_URL') + '/hub/api'
+        ))
+
+        if self.notebook_dir:
+            env['NOTEBOOK_DIR'] = self.notebook_dir
+
+        return env
 
     @gen.coroutine
-    def start_ec2_instance(self):
+    def start_ec2_instance(self, env):
         instanceDef= {
             'AWS_AMI_ID': os.getenv("AWS_AMI_ID"),
             'AWS_KEYNAME': os.getenv("AWS_KEYNAME"),
@@ -109,26 +177,42 @@ class EC2Spawner(Spawner):
         }
         
         print('building instance')
-        yield self.buildInstance(instanceDef)
+        yield self.buildInstance(instanceDef, env)
         return self.ec2_instance_ip
 
     @gen.coroutine
     def start(self):
-        notebook_server_ip = yield self.start_ec2_instance() # that would be a function that uses boto3 to start an instance, pass it the dict from get_env(), and return its IP
+        envs = self.user_env()
+        notebook_server_ip = yield self.start_ec2_instance(envs) # that would be a function that uses boto3 to start an instance, pass it the dict from get_env(), and return its IP
+        port = yield self.remote_random_port()
         
+        if port is None or port == 0:
+            return False
+
         cmd = []
         cmd.extend(self.cmd)
-
-        print(cmd)
-
-        print('Server: ', self.server)
-
         cmd.extend(self.get_args())
 
+        if self.hub_api_url != "":
+            old = "--hub-api-url={}".format(self.hub.api_url)
+            new = "--hub-api-url={}".format(self.hub_api_url)
+            for index, value in enumerate(cmd):
+                if value == old:
+                    cmd[index] = new
+        for index, value in enumerate(cmd):
+            if value[0:6] == '--port':
+                cmd[index] = '--port=%d' % (port)
 
+        remote_cmd = ' '.join(cmd)
 
-        print('Type of Port', type(int(self.ec2_instance_port)))
-        return (self.ec2_instance_ip, int(self.ec2_instance_port))
+        self.pid = yield self.exec_notebook(remote_cmd)
+
+        self.log.debug("Starting User: {}, PID: {}".format(self.user.name, self.pid))
+
+        if self.pid < 0:
+            return None
+        # DEPRECATION: Spawner.start should return a url or (ip, port) tuple in JupyterHub >= 0.9
+        return (self.notebook_server_ip, port)
     
     @gen.coroutine
     def stop_ec2_instance(self, instanceID):
@@ -137,7 +221,7 @@ class EC2Spawner(Spawner):
     @gen.coroutine
     def stop(self):
         try:
-            stop_ec2_instance(self.ec2_instance_id) # function that uses boto3 to stop an instance based on instance_id
+            self.stop_ec2_instance(self.ec2_instance_id) # function that uses boto3 to stop an instance based on instance_id
         except Exception as e:
             print("Error in terminating instance") # easy to save the instance id when you start the instance
             print(str(e)) # this will print the error on our JupyterHub process' output
@@ -167,8 +251,11 @@ class EC2Spawner(Spawner):
         """To save the state, so that we can persist it over restarts or similar."""
         """In our case it would include for example the instance ID of the EC2 instance we’ve spawned for our single-user server.:"""
         state = super().get_state()
+        print('Getting state')
         if self.ec2_instance_id:
             state['ec2_instance_id'] = self.ec2_instance_id
+            state["pid"] = self.pid
+            state['ec2_instance_ip'] = self.ec2_instance_ip
         return state
 
     def load_state(self, state):
@@ -180,5 +267,55 @@ class EC2Spawner(Spawner):
         JupyterHub before 0.7 also assumed your notebook was dead if it
         saved no state, so this helps with that too!
         """
+        print('Loading State')
         if 'ec2_instance_id' in state:
             self.ec2_instance_id = state['ec2_instance_id']
+            self.pid = state["pid"]
+            self.ec2_instance_ip = state['ec2_instance_ip']
+
+    def clear_state(self):
+        """Clear stored state about this spawner (pid)"""
+        super().clear_state()
+        self.pid = 0
+        self.ec2_instance_id
+        self.ec2_instance_ip
+
+    async def exec_notebook(self, command):
+        """TBD"""
+
+        env = self.user_env()
+        username = self.get_remote_user(self.user.name)
+        k = asyncssh.read_private_key(self.ssh_keyfile.format(username=self.user.name))
+        bash_script_str = "#!/bin/bash\n"
+
+        for item in env.items():
+            # item is a (key, value) tuple
+            # command = ('export %s=%s;' % item) + command
+            bash_script_str += 'export %s=%s\n' % item
+        bash_script_str += 'unset XDG_RUNTIME_DIR\n'
+
+        bash_script_str += '%s < /dev/null >> jupyter.log 2>&1 & pid=$!\n' % command
+        bash_script_str += 'echo $pid\n'
+
+        run_script = "/tmp/{}_run.sh".format(self.user.name)
+        with open(run_script, "w") as f:
+            f.write(bash_script_str)
+        if not os.path.isfile(run_script):
+            raise Exception("The file " + run_script + "was not created.")
+        else:
+            with open(run_script, "r") as f:
+                self.log.debug(run_script + " was written as:\n" + f.read())
+
+        async with asyncssh.connect(self.remote_host,username=username,client_keys=[k],known_hosts=None) as conn:
+            result = await conn.run("bash -s", stdin=run_script)
+            stdout = result.stdout
+            stderr = result.stderr
+            retcode = result.exit_status
+
+        self.log.debug("exec_notebook status={}".format(retcode))
+        if stdout != b'':
+            pid = int(stdout)
+        else:
+            return -1
+
+        return pid

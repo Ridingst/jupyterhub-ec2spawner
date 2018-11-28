@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='jupyterhub-ec2spawner',
-    version='0.22',
+    version='0.24',
     description='Simple EC2 spawner for JupyterHub',
     url='https://github.com/Ridingst/jupyterhub-ec2spawner',
     author='Thomas Ridings',

@@ -1,3 +1,5 @@
+.DS_Store
+
 # Jupyter specific
 jupyterhub_cookie_secret
 jupyterhub.sqlite
@@ -118,3 +120,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+.DS_Store
