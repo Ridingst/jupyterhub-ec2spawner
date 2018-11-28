@@ -124,7 +124,8 @@ class EC2Spawner(Spawner):
 
         self.remote_host = self.choose_remote_host()
         
-        port = await self.remote_random_port()
+        #port = await self.remote_random_port()
+        port=5555
         if port is None or port == 0:
             return False
         cmd = []
