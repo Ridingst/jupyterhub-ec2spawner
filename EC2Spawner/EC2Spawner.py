@@ -91,14 +91,13 @@ class EC2Spawner(Spawner):
         
         return TagSpecifications
 
-    @return_future
-    def buildInstance(self,  instanceDef, env, callback):
+    async def buildInstance(self,  instanceDef, env):
         """
             Build instance according to instanceDefinition object
             returns the id, ip address and full description of the instance once available as a dictionary.
         """
         # Create tag specifications which we use to pass variables to the instance
-        tags = self.env_to_tags(self.user_env())
+        tags = self.env_to_tags(env)
         
         import EC2Spawner as ec2spawnerModule
         bootstrapPath = os.path.dirname(ec2spawnerModule.__file__) + '/data/bootstrap.sh'
@@ -132,10 +131,9 @@ class EC2Spawner(Spawner):
         self.ec2_instance_ip = instanceIP
         self.log.debug("AWS Instance IP: {}".format(self.ec2_instance_ip))
         self.ec2_instance_id = instance[0].id
-        callback(instanceIP)
+        return instanceIP
     
-    @gen.coroutine
-    def start_ec2_instance(self, env):
+    async def start_ec2_instance(self, env):
         """Builds an ec2 instance on request"""
         instanceDef= {
             'AWS_AMI_ID': os.getenv("AWS_AMI_ID"),
@@ -148,8 +146,8 @@ class EC2Spawner(Spawner):
         }
         
         self.log.debug('building instance')
-        yield self.buildInstance(instanceDef, env)
-        return self.ec2_instance_ip
+        ip = await self.buildInstance(instanceDef, env)
+        return ip
     
     
     # TODO When we add host pool, we need to keep host/ip too, not just PID.
@@ -209,7 +207,7 @@ class EC2Spawner(Spawner):
         self.remote_host = await self.start_ec2_instance(envs)
         
         # commenting this out till I can figure out how to do aws networking within a subnet
-        #port = await self.remote_random_port()
+        # port = await self.remote_random_port()
         port=int(os.getenv('REMOTE_PORT'))
         if port is None or port == 0:
             return False
@@ -260,9 +258,8 @@ class EC2Spawner(Spawner):
         else:
             return None
     
-    @gen.coroutine
-    def stop_ec2_instance(self, instanceID):
-        self.ec2.instances.filter(InstanceIds=[instanceID]).terminate()
+    async def stop_ec2_instance(self, instanceID):
+        await self.ec2.instances.filter(InstanceIds=[instanceID]).terminate()
 
     async def stop(self, now=False):
         """Stop single-user server process for the current user."""
@@ -283,9 +280,10 @@ class EC2Spawner(Spawner):
     @observe('remote_host')
     def _log_remote_host(self, change):
         self.log.debug("Remote host was set to %s." % self.remote_host)
+    
 
     #This isn't being used right now
-    async def remote_random_port(self):
+    '''async def remote_random_port(self):
         """Select unoccupied port on the remote host and return it. 
         
         If this fails for some reason return `None`."""
@@ -307,15 +305,41 @@ class EC2Spawner(Spawner):
             self.log.error("Failed to get a remote port")
             self.log.error("STDERR={}".format(stderr))
             self.log.debug("EXITSTATUS={}".format(retcode))
-        return port
+        return port'''
+
+    async def run_connection(self, host, run_script, username, k):
+        async with asyncssh.connect(host,username=username,client_keys=[k],known_hosts=None) as conn:
+            result = await conn.run("bash -s", stdin=run_script)
+            stdout = result.stdout
+            stderr = result.stderr
+            retcode = result.exit_status
+            return (stdout, stderr, retcode)
+
+    async def run_connection_wrapper(self, run_script, username, k):
+        cnt=0
+        self.log.debug("{} {}".format(self.remote_host, username))
+        while cnt<5:
+            try:
+                stdout, stderr, retcode = asyncio.get_event_loop().run_until_complete(await self.run_connection(self.remote_host, run_script, username, k))
+                return (stdout, stderr, retcode)
+            except:
+                self.log.debug('Connection {}/6 failed, waiting before retry'.format(cnt+1))
+                # self.log.debug("SSH connection failed " + str(asyncssh.Error))
+                # self.log.debug("SSH connection failed " + str(exc))
+                cnt+=1
+                time.sleep(15)
+        try:
+            stdout, stderr, retcode = asyncio.get_event_loop().run_until_complete(await self.run_connection(self.remote_host, run_script, username, k))
+        except: 
+            raise Exception("SSH connection failed")
+        return (stdout, stderr, retcode)
 
     # FIXME add docstring
-    async def exec_notebook(self, command, timeout=250):
+    async def exec_notebook(self, command, timeout=750):
         """TBD"""
 
         env = self.user_env()
-        username = self.get_remote_user(self.user.name)
-        k = asyncssh.read_private_key(self.ssh_keyfile.format(username=self.user.name))
+        
         bash_script_str = "#!/bin/bash\n"
         bash_script_str += "echo ${USER}\n"
 
@@ -336,30 +360,19 @@ class EC2Spawner(Spawner):
         else:
             with open(run_script, "r") as f:
                 self.log.debug(run_script + " was written as:\n" + f.read())
-        loop = ioloop.IOLoop.current()
-        tic = loop.time()
-        passed = False
-        timeout=10000
-        cnt=0
-        while cnt < timeout:
-            # Fix this properly later
-            self.log.debug('Trying to connect...')
-            try:
-                time.sleep(30)
-                async with asyncssh.connect(self.remote_host,username=username,client_keys=[k],known_hosts=None) as conn:
-                    result = await conn.run("bash -s", stdin=run_script)
-                    self.log.debug('Connection success')
-                    stdout = result.stdout
-                    stderr = result.stderr
-                    retcode = result.exit_status
-                    passed=True
-            except:
-                time.sleep(20)
-                cnt+=20
-                self.log.debug('Connection failed, waiting...')
-                gen.Task(loop.add_timeout, loop.time() + 1)
-        if passed==False:
-            return -1
+        
+        self.log.debug('Running exec_notebook')
+        try:
+            self.log.debug('Attempting to make connection to remote host')
+            username = self.get_remote_user(self.user.name)
+            self.log.debug(self.ssh_keyfile)
+            k = asyncssh.read_private_key(self.ssh_keyfile)
+            self.log.debug(k.export_private_key('pkcs1-pem'))
+            
+            stdout, stderr, retcode = await self.run_connection_wrapper(run_script, username, k)
+        except (OSError, asyncssh.Error) as exc:
+            self.log.error('Connection failed, waiting...')
+             
         
         self.log.debug("exec_notebook status={}".format(retcode))
         if stdout != b'':
