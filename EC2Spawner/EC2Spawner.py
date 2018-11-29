@@ -228,6 +228,8 @@ class EC2Spawner(Spawner):
 
         remote_cmd = ' '.join(cmd)
 
+        remote_cmd = '/usr/local/bin/'+remote_cmd
+
         self.log.debug("Command issued to remote serve: {}".format(remote_cmd))
         self.pid = await self.exec_notebook(remote_cmd)
 
@@ -307,33 +309,6 @@ class EC2Spawner(Spawner):
             self.log.debug("EXITSTATUS={}".format(retcode))
         return port'''
 
-    async def run_connection(self, host, run_script, username, k):
-        async with asyncssh.connect(host,username=username,client_keys=[k],known_hosts=None) as conn:
-            result = await conn.run("bash -s", stdin=run_script)
-            stdout = result.stdout
-            stderr = result.stderr
-            retcode = result.exit_status
-            return (stdout, stderr, retcode)
-
-    async def run_connection_wrapper(self, run_script, username, k):
-        cnt=0
-        self.log.debug("{} {}".format(self.remote_host, username))
-        while cnt<5:
-            try:
-                stdout, stderr, retcode = asyncio.get_event_loop().run_until_complete(await self.run_connection(self.remote_host, run_script, username, k))
-                return (stdout, stderr, retcode)
-            except:
-                self.log.debug('Connection {}/6 failed, waiting before retry'.format(cnt+1))
-                # self.log.debug("SSH connection failed " + str(asyncssh.Error))
-                # self.log.debug("SSH connection failed " + str(exc))
-                cnt+=1
-                time.sleep(15)
-        try:
-            stdout, stderr, retcode = asyncio.get_event_loop().run_until_complete(await self.run_connection(self.remote_host, run_script, username, k))
-        except: 
-            raise Exception("SSH connection failed")
-        return (stdout, stderr, retcode)
-
     # FIXME add docstring
     async def exec_notebook(self, command, timeout=750):
         """TBD"""
@@ -341,13 +316,15 @@ class EC2Spawner(Spawner):
         env = self.user_env()
         
         bash_script_str = "#!/bin/bash\n"
-        bash_script_str += "echo ${USER}\n"
 
         for item in env.items():
             # item is a (key, value) tuple
             # command = ('export %s=%s;' % item) + command
             bash_script_str += 'export %s=%s\n' % item
         bash_script_str += 'unset XDG_RUNTIME_DIR\n'
+
+        bash_script_str += 'eval echo ${USER} >> user.log\n'
+        bash_script_str += 'eval ls -l /usr/local/bin/ >> dir.log\n'
 
         bash_script_str += '%s < /dev/null >> jupyter.log 2>&1 & pid=$!\n' % command
         bash_script_str += 'echo $pid\n'
@@ -366,12 +343,20 @@ class EC2Spawner(Spawner):
             self.log.debug('Attempting to make connection to remote host')
             username = self.get_remote_user(self.user.name)
             self.log.debug(self.ssh_keyfile)
+            self.log.debug(username, self.remote_host)
             k = asyncssh.read_private_key(self.ssh_keyfile)
-            self.log.debug(k.export_private_key('pkcs1-pem'))
             
-            stdout, stderr, retcode = await self.run_connection_wrapper(run_script, username, k)
+            ## TODO tidy this logic up to retry or check it's up.
+            time.sleep(10)
+            async with asyncssh.connect(self.remote_host,username=username,client_keys=[k],known_hosts=None) as conn:
+                result = await conn.run("bash -s", stdin=run_script)
+                stdout = result.stdout
+                stderr = result.stderr
+                retcode = result.exit_status
+            #stdout, stderr, retcode = await self.run_connection_wrapper(run_script, username, k)
         except (OSError, asyncssh.Error) as exc:
             self.log.error('Connection failed, waiting...')
+            raise Exception('Connection failed: ' + str(exc))
              
         
         self.log.debug("exec_notebook status={}".format(retcode))
