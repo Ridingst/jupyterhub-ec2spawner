@@ -12,23 +12,56 @@ INSTANCE_ID=$(/usr/bin/curl --silent http://169.254.169.254/latest/meta-data/ins
 echo 'export REGION='$REGION > ~/startup.sh
 echo 'export INSTANCE_ID='$INSTANCE_ID >> ~/startup.sh
 
-chmod +x ~/startup.sh
-sudo cp ~/startup.sh /etc/profile.d/startup.sh
-
-echo '/usr/local/bin/jupyterhub-singleuser' >> ~/bootup.sh
-
-chmod +x ~/bootup.sh
-sudo cp ~/bootup.sh /etc/init.d/bootup.sh
-
 
 export_statement=$(aws ec2 describe-tags --region "$REGION" \
     --filters "Name=resource-id,Values=$INSTANCE_ID" \
     --query 'Tags[?!contains(Key, `:`)].[Key,Value]' \
     --output text | \
-    sed -E 's/^([^\s\t]+)[\s\t]+([^\n]+)$/export \1="\2"/g'
+    sed -E 's/^([^\s\t]+)[\s\t]+([^\n]+)$/export \1="\2"/g >> ~/startup.sh'
 )
 
 eval $export_statement
+
+chmod +x ~/startup.sh
+sudo cp ~/startup.sh /etc/init.d/startup.sh
+
+echo 'TESTING LOGGING' > ~/TESTLOG.log
+
+echo '''
+import argparse
+import socket
+
+def main():
+    args = parse_arguments()
+    if args.ip:
+        print("{} {}".format(port(), ip()))
+    else:
+        print(port())
+
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ip", "-i",
+            help="Include IP address in output",
+            action="store_true")
+    return parser.parse_args()
+
+def port():
+    s = socket.socket()
+    s.bind(("", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+def ip(address=("8.8.8.8", 80)):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(address)
+    ip = s.getsockname()[0]
+    s.close()
+    return ip
+
+if __name__ == "__main__":
+    main()
+''' > /home/ec2-user/get-port.py
 
 echo "done everything"
 
