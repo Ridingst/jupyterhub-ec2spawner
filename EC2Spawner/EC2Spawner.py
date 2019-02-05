@@ -124,7 +124,7 @@ class EC2Spawner(Spawner):
         waiter = self.client.get_waiter('instance_running')
         
         self.log.debug('Waiting...')
-        waiter.wait(InstanceIds=[instance[0].id])
+        await waiter.wait(InstanceIds=[instance[0].id])
         description = self.client.describe_instances(InstanceIds=[instance[0].id])
         instanceIP = description['Reservations'][0]['Instances'][0]['NetworkInterfaces'][0]['Association']['PublicIp']
 
@@ -148,7 +148,7 @@ class EC2Spawner(Spawner):
         self.log.debug('building instance')
         ip = await self.buildInstance(instanceDef, env)
         return ip
-    
+
     
     # TODO When we add host pool, we need to keep host/ip too, not just PID.
     def load_state(self, state):
@@ -206,7 +206,7 @@ class EC2Spawner(Spawner):
         envs = self.user_env()
         self.remote_host = await self.start_ec2_instance(envs)
         
-        # commenting this out till I can figure out how to do aws networking within a subnet
+        # commenting this out till I have added aws networking within a subnet
         # port = await self.remote_random_port()
         port=int(os.getenv('REMOTE_PORT'))
         if port is None or port == 0:
