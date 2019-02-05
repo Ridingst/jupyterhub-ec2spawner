@@ -5,7 +5,7 @@ load_dotenv()
 
 remote_host =os.getenv('DEV_UTILS_remote_host')
 username=os.getenv('DEV_UTILS_username')
-k=asyncssh.read_private_key(os.getenv('DEV_UTILS_priavte_key'))
+k=asyncssh.read_private_key(os.getenv('DEV_UTILS_private_key'))
 
 async def run_connection(host, username, k):
     print('Running')
