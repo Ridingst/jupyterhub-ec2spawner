@@ -343,7 +343,7 @@ class EC2Spawner(Spawner):
             except:
                 tryCount +=1
                 if(tryCount == 3):
-                    raise Exception('Connection failed (except).')
+                    await raise Exception('Connection failed (except).')
                 else:
                     self.log.error('Connection failed, waiting 20 seconds...')
                     time.sleep(20)
