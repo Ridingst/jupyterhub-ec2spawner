@@ -282,32 +282,6 @@ class EC2Spawner(Spawner):
     @observe('remote_host')
     def _log_remote_host(self, change):
         self.log.debug("Remote host was set to %s." % self.remote_host)
-    
-
-    #This isn't being used right now
-    '''async def remote_random_port(self):
-        """Select unoccupied port on the remote host and return it. 
-        
-        If this fails for some reason return `None`."""
-
-        username = self.get_remote_user(self.user.name)
-        k = asyncssh.read_private_key(self.ssh_keyfile)
-
-        async with asyncssh.connect(self.remote_host,username=username,client_keys=[k],known_hosts=None) as conn:
-            result = await conn.run(self.remote_port_command)
-            stdout = result.stdout
-            stderr = result.stderr
-            retcode = result.exit_status
-
-        if stdout != b"" and stdout != '':
-            port = int(stdout)
-            self.log.debug("port={}".format(port))
-        else:
-            port = None
-            self.log.error("Failed to get a remote port")
-            self.log.error("STDERR={}".format(stderr))
-            self.log.debug("EXITSTATUS={}".format(retcode))
-        return port'''
 
     # FIXME add docstring
     async def exec_notebook(self, command, timeout=750):
@@ -339,24 +313,41 @@ class EC2Spawner(Spawner):
                 self.log.debug(run_script + " was written as:\n" + f.read())
         
         self.log.debug('Running exec_notebook')
-        try:
-            self.log.debug('Attempting to make connection to remote host')
-            username = self.get_remote_user(self.user.name)
-            self.log.debug(self.ssh_keyfile)
-            self.log.debug(username, self.remote_host)
-            k = asyncssh.read_private_key(self.ssh_keyfile)
-            
-            ## TODO tidy this logic up to retry or check it's up.
-            time.sleep(10)
-            async with asyncssh.connect(self.remote_host,username=username,client_keys=[k],known_hosts=None) as conn:
-                result = await conn.run("bash -s", stdin=run_script)
-                stdout = result.stdout
-                stderr = result.stderr
-                retcode = result.exit_status
-            #stdout, stderr, retcode = await self.run_connection_wrapper(run_script, username, k)
-        except (OSError, asyncssh.Error) as exc:
-            self.log.error('Connection failed, waiting...')
-            raise Exception('Connection failed: ' + str(exc))
+        
+        tryCount = 0
+        while(tryCount <= 3):
+            try:
+                self.log.debug('Attempting to make connection to remote host:' + tryCount)
+                username = self.get_remote_user(self.user.name)
+                self.log.debug(username, self.remote_host)
+                k = asyncssh.read_private_key(self.ssh_keyfile)
+                
+                ## TODO tidy this logic up to retry or check it's up.
+                self.log.debug("Sleeping...")
+                time.sleep(10)
+                self.log.debug("Done, attempting to connect...")
+                async with asyncssh.connect(self.remote_host,username=username,client_keys=[k],known_hosts=None) as conn:
+                    result = await conn.run("bash -s", stdin=run_script)
+                    stdout = result.stdout
+                    stderr = result.stderr
+                    retcode = result.exit_status
+                #stdout, stderr, retcode = await self.run_connection_wrapper(run_script, username, k)
+            except (OSError, asyncssh.Error) as exc:
+                sys.exit('SSH connection failed: ' + str(exc))
+                tryCount +=1
+                if(tryCount == 3):
+                    raise Exception('Connection failed (OSError): '+ str(exc))
+                else:
+                    self.log.error('Connection failed, waiting 20 seconds...')
+                    time.sleep(20)
+            except:
+                tryCount +=1
+                if(tryCount == 3):
+                    raise Exception('Connection failed (except).')
+                else:
+                    self.log.error('Connection failed, waiting 20 seconds...')
+                    time.sleep(20)
+        
              
         
         self.log.debug("exec_notebook status={}".format(retcode))
