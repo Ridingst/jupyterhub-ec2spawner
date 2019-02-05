@@ -303,7 +303,7 @@ class EC2Spawner(Spawner):
         bash_script_str += '%s < /dev/null >> jupyter.log 2>&1 & pid=$!\n' % command
         bash_script_str += 'echo $pid\n'
 
-        run_script = "/tmp/{}_run.sh".format(self.user.name)
+        run_script = "/usr/{}_run.sh".format(self.user.name)
         with open(run_script, "w") as f:
             f.write(bash_script_str)
         if not os.path.isfile(run_script):
