@@ -315,7 +315,8 @@ class EC2Spawner(Spawner):
         self.log.debug('Running exec_notebook')
         
         tryCount = 0
-        while(tryCount <= 3):
+        totTrys = 3
+        while(tryCount <= totTrys):
             try:
                 self.log.debug('Attempting to make connection to remote host:' + tryCount)
                 username = self.get_remote_user(self.user.name)
@@ -335,18 +336,13 @@ class EC2Spawner(Spawner):
             except (OSError, asyncssh.Error) as exc:
                 sys.exit('SSH connection failed: ' + str(exc))
                 tryCount +=1
-                if(tryCount == 3):
-                    raise Exception('Connection failed (OSError): '+ str(exc))
-                else:
-                    self.log.error('Connection failed, waiting 20 seconds...')
-                    time.sleep(20)
+                self.log.error('Connection failed, waiting 20 seconds...')
+                time.sleep(20)
             except:
                 tryCount +=1
-                if(tryCount == 3):
-                    raise Exception('Connection failed (except).')
-                else:
-                    self.log.error('Connection failed, waiting 20 seconds...')
-                    time.sleep(20)
+                self.log.error('Connection failed, waiting 20 seconds...')
+                time.sleep(20)
+        raise Exception('Connection failed (too many attempts).')
         
              
         
